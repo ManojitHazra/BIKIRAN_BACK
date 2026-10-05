@@ -9,7 +9,7 @@ import dotenv from 'dotenv';
 import healthRoutes from './routes/health.routes';
 import translateRoutes from './routes/translate.routes';
 import openAppRoutes from './routes/openApp.routes';
-import { supabase } from './services/supabase';
+import { supabase, secondarySupabase } from './services/supabase';
 
 dotenv.config();
 
@@ -24,12 +24,15 @@ app.use('/health', healthRoutes);
 app.use('/api/translate', translateRoutes);
 app.use('/open-app', openAppRoutes);
 
-// Root route: Responds to pings and queries Supabase so root pings also keep database 100% active
+// Root route: Responds to pings and queries both Supabase databases so root pings keep them 100% active
 app.get('/', async (_req: Request, res: Response) => {
   try {
-    await supabase.from('profiles').select('id').limit(1);
+    await Promise.allSettled([
+      supabase.from('profiles').select('id').limit(1),
+      secondarySupabase.from('user_form_responses').select('id').limit(1),
+    ]);
   } catch {}
-  res.send('Bikiran Career Mitra Backend API & Supabase Kept Alive 🚀');
+  res.send('Bikiran Career Mitra Backend API & Both Supabase Databases Kept Alive 🚀');
 });
 
 app.listen(PORT, () => {

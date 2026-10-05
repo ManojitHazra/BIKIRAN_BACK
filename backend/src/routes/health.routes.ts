@@ -9,41 +9,79 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { supabase } from '../services/supabase';
+import { supabase, secondarySupabase } from '../services/supabase';
 
 const router = Router();
 
 router.get('/', async (_req: Request, res: Response) => {
-  const startTime = Date.now();
-  let dbStatus = 'connected';
-  let dbLatencyMs = 0;
-  let dbNotice: string | null = null;
+  // 1. Ping Primary Database (Auth & Profiles)
+  const startPrimary = Date.now();
+  let primaryStatus = 'connected';
+  let primaryLatencyMs = 0;
+  let primaryNotice: string | null = null;
+
+  // 2. Ping Secondary Database (Form Responses & Career Explorer)
+  const startSecondary = Date.now();
+  let secondaryStatus = 'connected';
+  let secondaryLatencyMs = 0;
+  let secondaryNotice: string | null = null;
 
   try {
-    // 🏓 Ping Supabase database with a lightweight limit(1) query to register database activity
-    const { error } = await supabase.from('profiles').select('id').limit(1);
-    dbLatencyMs = Date.now() - startTime;
+    const [primaryResult, secondaryResult] = await Promise.allSettled([
+      supabase.from('profiles').select('id').limit(1),
+      secondarySupabase.from('user_form_responses').select('id').limit(1),
+    ]);
 
-    if (error) {
-      dbStatus = 'notice';
-      dbNotice = error.message;
+    // Handle Primary DB result
+    primaryLatencyMs = Date.now() - startPrimary;
+    if (primaryResult.status === 'fulfilled') {
+      if (primaryResult.value.error) {
+        primaryStatus = 'notice';
+        primaryNotice = primaryResult.value.error.message;
+      }
+    } else {
+      primaryStatus = 'unreachable';
+      primaryNotice = primaryResult.reason?.message || 'Primary ping failed';
+    }
+
+    // Handle Secondary DB result
+    secondaryLatencyMs = Date.now() - startSecondary;
+    if (secondaryResult.status === 'fulfilled') {
+      if (secondaryResult.value.error) {
+        secondaryStatus = 'notice';
+        secondaryNotice = secondaryResult.value.error.message;
+      }
+    } else {
+      secondaryStatus = 'unreachable';
+      secondaryNotice = secondaryResult.reason?.message || 'Secondary ping failed';
     }
   } catch (err: any) {
-    dbStatus = 'unreachable';
-    dbNotice = err.message || 'Unknown database ping error';
+    primaryStatus = 'unreachable';
+    secondaryStatus = 'unreachable';
+    primaryNotice = err?.message || 'Unknown health ping error';
   }
 
   res.status(200).json({
     status: 'ok',
     uptimeSeconds: Math.round(process.uptime()),
     server: 'healthy',
-    database: {
-      provider: 'Supabase PostgreSQL',
-      status: dbStatus,
-      latencyMs: dbLatencyMs,
-      notice: dbNotice,
+    databases: {
+      primary: {
+        name: 'Database 1 (Auth & Profiles)',
+        provider: 'Supabase PostgreSQL',
+        status: primaryStatus,
+        latencyMs: primaryLatencyMs,
+        notice: primaryNotice,
+      },
+      secondary: {
+        name: 'Database 2 (Form Responses)',
+        provider: 'Supabase PostgreSQL',
+        status: secondaryStatus,
+        latencyMs: secondaryLatencyMs,
+        notice: secondaryNotice,
+      },
     },
-    message: 'Bikiran Career Mitra Backend & Supabase Database Kept Alive 🚀',
+    message: 'Bikiran Career Mitra Backend & Both Supabase Databases Kept Alive 🚀',
     timestamp: new Date().toISOString(),
   });
 });
